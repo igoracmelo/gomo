@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -24,6 +25,8 @@ type {{ .Name }}Mock struct {
     {{- end }}
 }
 
+var _ {{ .Name }} = &{{ .Name }}Mock{}
+
 {{ range .Methods }}
 func (m *{{ $.Name }}Mock) {{ .Name }}({{ joinParams .Params }}){{ if .Returns }} ({{ joinParams .Returns }}){{ end }} {
     {{ if .Returns }}return {{ end }}m.{{ .Name }}Func({{ joinParamNames .Params }})
@@ -32,19 +35,19 @@ func (m *{{ $.Name }}Mock) {{ .Name }}({{ joinParams .Params }}){{ if .Returns }
 `
 
 func main() {
-	if len(os.Args) < 2 {
-		panic("usage: gomo <file>")
-	}
-	target := os.Args[1]
+	var relPath string
+	var target string
+	flag.StringVar(&relPath, "f", "", "path to go file")
+	flag.StringVar(&target, "i", "", "interface to mock")
+	flag.Parse()
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		panic(err)
+	if relPath == "" || target == "" {
+		flag.Usage()
+		os.Exit(1)
 	}
 
 	fset := token.NewFileSet()
-	fpath := filepath.Join(cwd, os.Getenv("GOFILE"))
-	src, err := os.ReadFile(fpath)
+	src, err := os.ReadFile(relPath)
 	if err != nil {
 		panic(err)
 	}
@@ -154,10 +157,11 @@ func main() {
 		panic(err)
 	}
 
-	fname := os.Getenv("GOFILE")
-	fname = strings.Replace(fname, ".go", "_mock.go", 1)
+	name := filepath.Base(relPath)
+	dir := filepath.Dir(relPath)
+	name = strings.Replace(name, ".go", "_mock.go", 1)
 
-	f, err := os.Create(filepath.Join(cwd, fname))
+	f, err := os.Create(filepath.Join(dir, name))
 	if err != nil {
 		panic(err)
 	}
@@ -166,22 +170,6 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-
-	// iface := regexp.MustCompile(`type Example interface\s?\{(.*|\n)*?\}`).Find(b)
-	// fmt.Println(string(iface))
-
-	// if len(iface) == 0 {
-	// 	panic("no interface found")
-	// }
-
-	// lines := bytes.Split(iface, []byte("\n"))
-	// if len(lines) <= 2 {
-	// 	lines = bytes.Split(iface, []byte(";"))
-	// }
-
-	// if len(lines) <= 2 {
-	// 	// TODO empty interface
-	// }
 }
 
 func argName(name string, index int) string {
