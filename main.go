@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"go/ast"
@@ -10,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+
+	"golang.org/x/tools/imports"
 )
 
 type param struct {
@@ -18,6 +21,14 @@ type param struct {
 }
 
 const tmpl = `package {{ .Package }}
+
+{{- if .Imports }}
+import (
+	{{- range .Imports }}
+	{{ if .Alias }}{{ .Alias }}{{ end }} {{ .Path }}
+	{{ end }}
+)
+{{ end -}}
 
 type {{ .Name }}Mock struct {
     {{- range .Methods }}
@@ -62,21 +73,49 @@ func main() {
 		Returns []param
 	}
 
-	info := struct {
+	type Info struct {
 		Package  string
 		Name     string
 		MockName string
-		Imports  []string
-		Methods  []methodInfo
-	}{}
+		Imports  []struct {
+			Path  string
+			Alias string
+		}
+		Methods []methodInfo
+	}
+	info := Info{}
 
 	info.Package = astFile.Name.Name
 
+	extractImport := func(info *Info, imp *ast.ImportSpec) {
+		alias := ""
+		if imp.Name != nil {
+			alias = imp.Name.Name
+			println(alias)
+		}
+		println(imp.Path.Value)
+
+		info.Imports = append(info.Imports, struct {
+			Path  string
+			Alias string
+		}{
+			Path:  imp.Path.Value,
+			Alias: alias,
+		})
+	}
+
 	ast.Inspect(astFile, func(n ast.Node) bool {
+		imp, ok := n.(*ast.ImportSpec)
+		if ok {
+			extractImport(&info, imp)
+			return true
+		}
+
 		typ, ok := n.(*ast.TypeSpec)
 		if !ok {
 			return true
 		}
+
 		if typ.Name.Name != target {
 			return true
 		}
@@ -89,6 +128,9 @@ func main() {
 			return true
 		}
 		for _, meth := range iface.Methods.List {
+			if len(meth.Names) == 0 {
+				continue
+			}
 			methName := meth.Names[0].Name
 			params := []param{}
 			returns := []param{}
@@ -160,13 +202,20 @@ func main() {
 	name := filepath.Base(relPath)
 	dir := filepath.Dir(relPath)
 	name = strings.Replace(name, ".go", "_mock.go", 1)
+	filename := filepath.Join(dir, name)
 
-	f, err := os.Create(filepath.Join(dir, name))
+	buf := &bytes.Buffer{}
+	err = t.Execute(buf, info)
 	if err != nil {
 		panic(err)
 	}
 
-	err = t.Execute(f, info)
+	b, err := imports.Process(name, buf.Bytes(), nil)
+	if err != nil {
+		panic(err)
+	}
+
+	err = os.WriteFile(filename, b, 0666)
 	if err != nil {
 		panic(err)
 	}
